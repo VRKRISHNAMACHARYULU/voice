@@ -26,7 +26,11 @@ from sklearn.metrics.pairwise import cosine_similarity
 import random
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, resources={r"/*": {"origins": [
+    "https://myportfolio-liard-two-33.vercel.app",  # Your Vercel domain
+    "http://localhost:3000",  # For local development
+    # Add any other domains you need
+]}})
 
 logger.info("Loading model and data...")
 try:
