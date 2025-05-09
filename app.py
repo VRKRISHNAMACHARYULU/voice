@@ -5,8 +5,10 @@ from flask_cors import CORS
 import logging
 import os
 import traceback
+from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import random
+import gc  # For garbage collection
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -14,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 # Configuration
 CONFIG = {
-    'similarity_threshold': 0.5,
+    'similarity_threshold': 0.3,  # Lower threshold for TF-IDF since scores tend to be lower
     'port': int(os.environ.get('PORT', 5000)),
     'host': '0.0.0.0'
 }
@@ -26,12 +28,6 @@ ALLOWED_ORIGINS = [
     # Add any other domains you need
 ]
 
-try:
-    from sentence_transformers import SentenceTransformer
-except ImportError:
-    logger.error("The 'sentence_transformers' library is not installed. Install it using 'pip install sentence-transformers'.")
-    raise ImportError("The 'sentence_transformers' library is not installed. Install it using 'pip install sentence-transformers'.")
-
 app = Flask(__name__)
 
 # Configure CORS with explicit options
@@ -41,7 +37,7 @@ CORS(app,
      allow_headers=["Content-Type", "Authorization"],
      methods=["GET", "POST", "OPTIONS"])
 
-logger.info("Loading model and data...")
+logger.info("Loading data...")
 try:
     # Load the data
     with open('qa_data.json', 'r') as f:
@@ -50,23 +46,11 @@ try:
     questions = data['questions']
     qa_dict = data['qa_dict']
     
-    # Load embeddings from numpy file if it exists, otherwise use from JSON
-    try:
-        embeddings = np.load('question_embeddings.npy')
-        logger.info("Loaded embeddings from .npy file")
-    except FileNotFoundError:
-        logger.info("Embeddings .npy file not found, using from JSON")
-        embeddings = np.array(data.get('embeddings', []))
-        # Save for next time
-        np.save('question_embeddings.npy', embeddings)
-    
-    # Load the saved model
-    try:
-        model = SentenceTransformer('sentence_transformer_model')
-        logger.info("Loaded saved model successfully")
-    except Exception as e:
-        logger.warning(f"Could not load saved model, using default instead: {e}")
-        model = SentenceTransformer('all-MiniLM-L6-v2')
+    # Instead of using the transformer model, create TF-IDF vectors
+    logger.info("Creating TF-IDF vectorizer...")
+    vectorizer = TfidfVectorizer(stop_words='english')
+    question_vectors = vectorizer.fit_transform(questions)
+    logger.info(f"Vectorizer created with {len(vectorizer.get_feature_names_out())} features")
     
     # Load fallbacks
     try:
@@ -80,9 +64,13 @@ try:
             "That's beyond my current knowledge. I'd be happy to tell you about my portfolio."
         ]
     
-    logger.info(f"Model and data loaded successfully! Loaded {len(questions)} questions.")
+    logger.info(f"Data loaded successfully! Loaded {len(questions)} questions.")
+    
+    # Force garbage collection to free memory
+    gc.collect()
+    
 except Exception as e:
-    logger.error(f"Error loading model or data: {e}")
+    logger.error(f"Error loading data: {e}")
     logger.error(traceback.format_exc())
     exit(1)
 
@@ -129,9 +117,9 @@ def ask():
             })
             return add_cors_headers(response, origin)
         
-        # Process the question
-        query_embedding = model.encode([query])[0]
-        similarities = cosine_similarity([query_embedding], embeddings)[0]
+        # Process the question using TF-IDF
+        query_vector = vectorizer.transform([query])
+        similarities = cosine_similarity(query_vector, question_vectors)[0]
         
         # Find best match
         best_idx = np.argmax(similarities)
@@ -152,6 +140,9 @@ def ask():
             'matched_question': questions[best_idx] if best_score >= threshold else None
         })
         
+        # Force garbage collection to free memory
+        gc.collect()
+        
         return add_cors_headers(response, origin)
     except Exception as e:
         logger.error(f"Error processing request: {str(e)}")
@@ -165,7 +156,6 @@ def health_check():
     origin = request.headers.get('Origin', ALLOWED_ORIGINS[0])
     response = jsonify({
         'status': 'healthy',
-        'model_loaded': True,
         'questions_count': len(questions) if 'questions' in globals() else 0,
         'cors_allowed_origins': ALLOWED_ORIGINS
     })
