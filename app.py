@@ -23,7 +23,7 @@ CONFIG = {
 
 # List of allowed origins
 ALLOWED_ORIGINS = [
-    "https://myportfolio-liard-two-33.vercel.app",
+    "https://krishnamacharyulu.vercel.app",
     "http://localhost:3000",
     # Add any other domains you need
 ]
